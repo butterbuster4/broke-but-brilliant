@@ -43,6 +43,22 @@ def run_command(args: list[str], cwd: Path) -> str | None:
     return result.stdout.strip() or None
 
 
+def run_command_with_status(args: list[str], cwd: Path) -> tuple[bool, str | None]:
+    try:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False, None
+    return result.returncode == 0, result.stdout.strip() or None
+
+
 def find_git_root(target: Path) -> Path | None:
     git_root = run_command(["git", "rev-parse", "--show-toplevel"], target)
     if git_root:
@@ -117,6 +133,7 @@ def get_torch_info() -> dict[str, Any]:
     info: dict[str, Any] = {
         "installed": False,
         "version": UNKNOWN,
+        "build": UNKNOWN,
         "cuda_available": False,
         "cuda_version": UNKNOWN,
         "gpus": [],
@@ -129,7 +146,14 @@ def get_torch_info() -> dict[str, Any]:
         return info
 
     info["installed"] = True
-    info["version"] = getattr(torch, "__version__", UNKNOWN)
+    version = getattr(torch, "__version__", UNKNOWN)
+    info["version"] = version
+    if isinstance(version, str) and "+" in version:
+        info["build"] = version.rsplit("+", 1)[1]
+    elif getattr(torch.version, "cuda", None):
+        info["build"] = "cuda"
+    else:
+        info["build"] = UNKNOWN
     info["cuda_available"] = bool(torch.cuda.is_available())
     info["cuda_version"] = getattr(torch.version, "cuda", None) or UNKNOWN
 
@@ -145,6 +169,118 @@ def get_torch_info() -> dict[str, Any]:
             )
 
     return info
+
+
+def get_nvidia_smi_gpus(target: Path) -> tuple[bool, list[dict[str, Any]]]:
+    ok, output = run_command_with_status(
+        [
+            "nvidia-smi",
+            "--query-gpu=index,name,memory.total,driver_version",
+            "--format=csv,noheader,nounits",
+        ],
+        target,
+    )
+    if not ok or not output:
+        return False, []
+
+    gpus: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 4:
+            continue
+        memory_mib: int | str
+        try:
+            memory_mib = int(parts[2])
+        except ValueError:
+            memory_mib = UNKNOWN
+        gpus.append(
+            {
+                "index": parts[0],
+                "name": parts[1],
+                "total_vram_mib": memory_mib,
+                "driver_version": parts[3],
+            }
+        )
+
+    return True, gpus
+
+
+def get_windows_gpus(target: Path) -> list[dict[str, Any]]:
+    if platform.system().lower() != "windows":
+        return []
+
+    ok, output = run_command_with_status(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress",
+        ],
+        target,
+    )
+    if not ok or not output:
+        return []
+
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+
+    entries = parsed if isinstance(parsed, list) else [parsed]
+    gpus: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("Name") or UNKNOWN
+        adapter_ram = entry.get("AdapterRAM")
+        try:
+            adapter_ram_gib = bytes_to_gib(int(adapter_ram)) if adapter_ram is not None else UNKNOWN
+        except (TypeError, ValueError):
+            adapter_ram_gib = UNKNOWN
+        gpus.append({"name": name, "adapter_ram_gib": adapter_ram_gib})
+
+    return gpus
+
+
+def interpret_gpu_environment(
+    torch_info: dict[str, Any],
+    nvidia_smi_available: bool,
+    nvidia_smi_gpus: list[dict[str, Any]],
+    windows_gpus: list[dict[str, Any]],
+    cuda_visible_devices: str | None,
+) -> tuple[bool, str]:
+    torch_gpus = torch_info.get("gpus") or []
+    any_gpu_detected = bool(nvidia_smi_gpus or windows_gpus or torch_gpus)
+    nvidia_seen = bool(nvidia_smi_gpus) or any(
+        "nvidia" in str(gpu.get("name", "")).lower() for gpu in windows_gpus + torch_gpus
+    )
+    torch_installed = bool(torch_info.get("installed"))
+    torch_cuda_available = bool(torch_info.get("cuda_available"))
+    torch_cuda_runtime = torch_info.get("cuda_version") not in (None, "", UNKNOWN)
+    torch_build = str(torch_info.get("build", UNKNOWN)).lower()
+    cuda_hidden = cuda_visible_devices in ("", "-1", "none", "None")
+
+    if not any_gpu_detected:
+        return False, "no GPU hardware detected by nvidia-smi, Windows GPU detection, or PyTorch"
+
+    if nvidia_seen and torch_cuda_available:
+        return True, "NVIDIA GPU exists and PyTorch CUDA works"
+
+    if nvidia_seen and torch_installed and ("cpu" in torch_build or not torch_cuda_runtime):
+        return True, "NVIDIA GPU exists but PyTorch appears to be CPU-only"
+
+    if nvidia_seen and torch_installed and torch_cuda_runtime and not torch_cuda_available:
+        if cuda_hidden:
+            return True, "GPU exists but CUDA_VISIBLE_DEVICES appears to hide CUDA devices from PyTorch"
+        return True, "GPU exists but driver/CUDA/PyTorch environment is likely misconfigured"
+
+    if nvidia_seen and not nvidia_smi_available:
+        return True, "NVIDIA GPU is visible to the OS, but nvidia-smi is unavailable; driver or PATH may be misconfigured"
+
+    if nvidia_seen:
+        return True, "NVIDIA GPU hardware detected, but PyTorch CUDA status is unavailable or not working"
+
+    return True, "GPU hardware detected, but no NVIDIA CUDA-capable GPU was identified"
 
 
 def detect_runtime_hints(target: Path) -> list[str]:
@@ -170,6 +306,16 @@ def build_profile(target: Path) -> dict[str, Any]:
     disk = shutil.disk_usage(target)
     git_root = find_git_root(target)
     torch_info = get_torch_info()
+    nvidia_smi_available, nvidia_smi_gpus = get_nvidia_smi_gpus(target)
+    windows_gpus = get_windows_gpus(target)
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    gpu_hardware_detected, gpu_interpretation = interpret_gpu_environment(
+        torch_info,
+        nvidia_smi_available,
+        nvidia_smi_gpus,
+        windows_gpus,
+        cuda_visible_devices,
+    )
     ram_bytes = get_ram_bytes()
 
     return {
@@ -202,6 +348,15 @@ def build_profile(target: Path) -> dict[str, Any]:
             "root": str(git_root) if git_root else UNKNOWN,
         },
         "pytorch": torch_info,
+        "gpu_hardware_detected": gpu_hardware_detected,
+        "nvidia_smi_available": nvidia_smi_available,
+        "nvidia_smi_gpus": nvidia_smi_gpus,
+        "windows_gpus": windows_gpus,
+        "torch_cuda_available": torch_info["cuda_available"],
+        "torch_build": torch_info["build"],
+        "cuda_runtime_from_torch": torch_info["cuda_version"],
+        "cuda_visible_devices": "set" if cuda_visible_devices is not None else "not set",
+        "gpu_interpretation": gpu_interpretation,
         "runtime_hints": detect_runtime_hints(target),
     }
 
@@ -215,8 +370,10 @@ def collect_missing_info(profile: dict[str, Any]) -> list[str]:
         missing.append("RAM total")
     if not profile["pytorch"]["installed"]:
         missing.append("PyTorch version and CUDA/GPU details from PyTorch")
-    elif profile["pytorch"]["cuda_available"] and not profile["pytorch"]["gpus"]:
-        missing.append("GPU name and VRAM")
+    if profile["gpu_hardware_detected"] and not profile["nvidia_smi_available"]:
+        missing.append("NVIDIA driver status from nvidia-smi")
+    if profile["gpu_hardware_detected"] and not profile["torch_cuda_available"]:
+        missing.append("Working PyTorch CUDA environment")
     if profile["runtime_hints"] == ["unknown"]:
         missing.append("cloud/runtime provider")
 
@@ -247,6 +404,7 @@ def write_missing_info(path: Path, missing: list[str]) -> None:
             "- Target table, figure, metric, or claim",
             "- Dataset access path and expected splits",
             "- Time, storage, and budget constraints",
+            "- Whether you have access to cloud GPUs such as AutoDL, Colab, Kaggle, RunPod, Vast.ai, or university servers",
             "",
         ]
     )
@@ -255,14 +413,26 @@ def write_missing_info(path: Path, missing: list[str]) -> None:
 
 def write_repro_context(path: Path, profile: dict[str, Any]) -> None:
     torch_info = profile["pytorch"]
-    gpu_lines = torch_info["gpus"] or []
-    if gpu_lines:
+    torch_gpu_lines = torch_info["gpus"] or []
+    smi_gpu_lines = profile["nvidia_smi_gpus"] or []
+    windows_gpu_lines = profile["windows_gpus"] or []
+    if smi_gpu_lines:
         gpu_summary = "\n".join(
-            f"- GPU {gpu['index']}: {gpu['name']} ({gpu['total_vram_gib']} GiB)"
-            for gpu in gpu_lines
+            f"- nvidia-smi GPU {gpu['index']}: {gpu['name']} ({gpu['total_vram_mib']} MiB), driver {gpu['driver_version']}"
+            for gpu in smi_gpu_lines
+        )
+    elif torch_gpu_lines:
+        gpu_summary = "\n".join(
+            f"- PyTorch GPU {gpu['index']}: {gpu['name']} ({gpu['total_vram_gib']} GiB)"
+            for gpu in torch_gpu_lines
+        )
+    elif windows_gpu_lines:
+        gpu_summary = "\n".join(
+            f"- Windows GPU: {gpu['name']} ({gpu['adapter_ram_gib']} GiB adapter RAM)"
+            for gpu in windows_gpu_lines
         )
     else:
-        gpu_summary = "- Unknown or unavailable through PyTorch"
+        gpu_summary = "- No GPU hardware detected by available probes"
 
     lines = [
         "# Reproduction Context",
@@ -276,13 +446,17 @@ def write_repro_context(path: Path, profile: dict[str, Any]) -> None:
         f"- RAM: {profile['ram']['total_gib']} GiB",
         f"- Working directory disk: {profile['disk_for_working_directory']['free_gib']} GiB free / {profile['disk_for_working_directory']['total_gib']} GiB total",
         f"- Runtime hints: {', '.join(profile['runtime_hints'])}",
+        f"- GPU interpretation: {profile['gpu_interpretation']}",
         "",
         "## PyTorch Facts",
         "",
         f"- PyTorch installed: {torch_info['installed']}",
         f"- PyTorch version: {torch_info['version']}",
+        f"- PyTorch build: {profile['torch_build']}",
         f"- CUDA available through PyTorch: {torch_info['cuda_available']}",
         f"- CUDA version reported by PyTorch: {torch_info['cuda_version']}",
+        f"- nvidia-smi available: {profile['nvidia_smi_available']}",
+        f"- CUDA_VISIBLE_DEVICES: {profile['cuda_visible_devices']}",
         "",
         "## GPUs",
         "",
