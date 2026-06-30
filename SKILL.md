@@ -310,6 +310,31 @@ The assistant must not treat estimates as paper facts.
 
 If required information is missing, update `.bbb/missing_info.md` and ask the user to provide only the missing information that cannot be detected automatically.
 
+## Fallback Recommendation Rules
+
+The assistant may recommend a reduced-scale, smoke-test, tiny, or approximate fallback when the user's exact reproduction target is unclear or when faithful reproduction appears infeasible under the detected hardware.
+
+However, fallback recommendations are not the same as fallback execution.
+
+Rules:
+
+1. If the user has not clearly specified the target result, first provide a feasibility assessment for likely faithful reproduction.
+2. It is acceptable to suggest practical fallback options such as smoke tests, tiny runs, tokenizer checks, one-batch overfit tests, or pipeline sanity checks.
+3. These fallback options must be clearly labeled as non-faithful alternatives when they change the paper's scale, model, data, training length, or evaluation target.
+4. Do not treat a fallback as the active plan until the user explicitly accepts it.
+5. Do not modify code, configs, datasets, model size, image size, sequence length, batch protocol, training steps, or evaluation scope to match a fallback unless the user approves that fallback.
+6. If the user explicitly asks for faithful reproduction, do not recommend fallback as the default path. State infeasibility first, then list fallback options separately.
+7. If the user only asks whether their hardware is sufficient, answer the hardware feasibility question first. Fallbacks may be listed as possible alternatives, but not as the assumed goal.
+8. Never describe a fallback result as reproducing the paper's main result unless the paper itself uses that same reduced setting.
+
+Preferred wording:
+
+- "Your machine is not suitable for faithful LLM training reproduction, but it can run smoke tests or pipeline sanity checks."
+- "If you accept an approximate goal, a tiny model run can verify the training loop."
+- "This would validate implementation mechanics, not reproduce the paper's reported result."
+- "Before making code changes for the fallback, confirm that this is the target you want."
+
+
 
 ## Output Format
 
