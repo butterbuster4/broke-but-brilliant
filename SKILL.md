@@ -7,7 +7,21 @@ description: Low-compute machine learning paper reproduction planning. Use when 
 
 ## Operating Goal
 
-Help users reproduce the core claim of a machine learning paper under limited compute. Optimize for a credible minimal reproduction, not a full-scale rerun, and make every deviation from the paper explicit.
+Help users reproduce machine learning papers under constrained compute while preserving the paper method or the user's stated requirement by default. First assess whether faithful reproduction is possible; use engineering optimizations before approximations, and make every deviation from the paper explicit.
+
+## Core Principles
+
+### Repository Grounding
+
+The current repository is the source of truth. Before suggesting or editing concrete code, inspect the relevant current files: training entry points, configs, dataset classes, model definitions, evaluation scripts, dependency files, and existing utilities.
+
+Do not generate drop-in replacement code based only on the user's description, memory, prior conversation, or assumed structure. If the relevant files have not been inspected, provide only a plan, checklist, or pseudocode and clearly say the answer is ungrounded in the current repository.
+
+### Fidelity First
+
+The default goal is faithful reproduction of the paper or the user's stated requirement. Do not automatically use a smaller, approximate, toy, or reduced-scale reproduction unless the user explicitly asks for it.
+
+If faithful reproduction is infeasible under current compute, say so directly. Offer approximations only as optional alternatives, clearly labeled as reduced-scale, directional, smoke-test, or approximate rather than faithful reproduction.
 
 ## Intake
 
@@ -23,8 +37,8 @@ If inputs are missing, proceed with clearly labeled assumptions and include a sh
 
 ## Analysis Workflow
 
-1. Identify the smallest reproducible claim.
-   - Prefer one central metric, one dataset split, one baseline comparison, or one qualitative result.
+1. Identify the faithful target claim.
+   - Prefer the user's stated target, one central paper metric, one dataset split, one baseline comparison, or one qualitative result.
    - Separate "paper claim to test" from background implementation details.
    - Flag claims that require unavailable private data, proprietary models, very large pretraining, or ambiguous evaluation.
 
@@ -38,9 +52,10 @@ If inputs are missing, proceed with clearly labeled assumptions and include a sh
    - Explain the likely bottleneck: data loading, preprocessing, GPU memory, matrix compute, optimizer state, evaluation cost, or storage.
    - Prefer ranges over false precision.
 
-4. Design the minimal reproduction.
-   - Choose the smallest dataset subset, model variant, training duration, and evaluation scope that can still test the target claim.
-   - Preserve the paper's objective, data preprocessing semantics, train/eval split rules, metric definitions, random seed control, and comparison direction unless explicitly impossible.
+4. Design the faithful reproduction path first.
+   - Preserve the paper's objective, dataset, model, data preprocessing semantics, train/eval split rules, metric definitions, random seed control, batch semantics, and comparison direction unless explicitly impossible.
+   - Use engineering optimizations that preserve meaning before proposing reduced-scale changes.
+   - Choose smaller dataset subsets, model variants, training duration, or evaluation scope only when the user asks for reduced-scale reproduction or after clearly stating faithful reproduction is infeasible.
    - Produce concrete commands or pseudocommands using the repo's existing config system when available.
 
 5. Separate optimizations from approximations.
@@ -102,7 +117,7 @@ Do not call a reproduction successful solely because the run completes.
 
 The current repository is the source of truth.
 
-Before suggesting or editing concrete code, the assistant must inspect the relevant current files in the workspace. Do not generate replacement code based only on the user's description, memory, prior conversation, or assumed repository structure.
+Before suggesting or editing concrete code, inspect the relevant current files in the workspace. Do not generate replacement code based only on the user's description, memory, prior conversation, or assumed repository structure.
 
 When working with code:
 
@@ -178,12 +193,15 @@ Preferred phrasing:
 
 Structure responses as:
 
-1. **Target Claim**: the paper result being reproduced and why it is the minimal credible target.
-2. **Feasibility**: expected compute fit for the user's hardware, with main bottlenecks.
-3. **Minimal Plan**: numbered steps, commands/configs, dataset handling, run order, and estimated time.
-4. **Safe Optimizations**: optimizations that should preserve meaning.
-5. **Approximations**: deviations from the paper, why they are needed, and how they bias interpretation.
-6. **Correctness Checks**: preflight, smoke, training/eval, and result checks.
-7. **Stop/Continue Criteria**: what result is enough, what failure means, and what to try next.
+1. **Grounding Status**: list which repository files/configs were inspected, or say the answer is only a plan/pseudocode because files were not inspected.
+2. **Fidelity Status**: use one of: faithful reproduction, faithful-with-engineering-optimization, infeasible, or optional approximation.
+3. **Change Risk**: use one of: safe engineering change, numerically sensitive change, approximate reproduction, or method-changing modification.
+4. **Target Claim**: the paper result or user requirement being reproduced and what must be preserved.
+5. **Feasibility**: expected compute fit for the user's hardware, with main bottlenecks.
+6. **Plan**: numbered steps, commands/configs when grounded, dataset handling, run order, and estimated time.
+7. **Safe Optimizations**: optimizations that should preserve meaning.
+8. **Approximations**: optional deviations from the paper, why they may be needed, and how they bias interpretation.
+9. **Correctness Checks**: preflight, smoke, training/eval, and result checks.
+10. **Stop/Continue Criteria**: what result is enough, what failure means, and what to try next.
 
-Keep plans executable and budget-aware. Prefer one viable path over a broad menu unless the user asks for alternatives.
+Keep plans executable and budget-aware. Prefer one viable faithful path over a broad menu unless the user asks for alternatives. If the repository has not been inspected, do not present commands or patches as drop-in code.
