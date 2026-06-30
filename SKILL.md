@@ -31,6 +31,16 @@ The paper's actual method and experimental protocol must be understood before pr
 
 Before editing code, generate `.bbb/reproduction_plan.md` and get the user's approval. The plan must distinguish paper facts, repository facts, hardware facts, and estimates. Estimated paper details must be explicitly labeled as estimates.
 
+For code-related tasks, follow this required sequence:
+
+1. Inspect the paper, README, config, or method description if available.
+2. Inspect the current repository files.
+3. Generate `.bbb/reproduction_plan.md`.
+4. Ask the user to approve the plan.
+5. Only then edit code.
+
+Do not say "I can modify the code to make it run" unless the repository has been inspected and the user has approved the plan. Prefer: "I can inspect the repository and generate a minimal runnable configuration plan. After you approve the plan, I can apply the changes."
+
 ## Intake
 
 Collect or infer these inputs before planning:
@@ -209,10 +219,21 @@ Preferred behavior:
 - "Based on the current `solver.py`, the safe change is limited to this function."
 - "This is pseudocode because the repository structure has not been inspected."
 - "The current code does not match the described architecture, so I will not generate a drop-in patch yet."
+- "I can inspect the repository and generate a minimal runnable configuration plan. After you approve the plan, I can apply the changes."
+
+If no repository has been inspected, clearly say that any configuration advice is general and not a drop-in patch.
 
 ## Reproduction Plan Gate
 
 Before editing code, create `.bbb/reproduction_plan.md`. Do not edit code until the user approves that plan.
+
+The required code-change sequence is:
+
+1. Inspect paper, README, config, or method description if available.
+2. Inspect current repository files.
+3. Generate `.bbb/reproduction_plan.md`.
+4. Ask for explicit user approval.
+5. Edit code only after approval.
 
 The plan must contain:
 
@@ -326,30 +347,62 @@ Rules:
 6. If the user explicitly asks for faithful reproduction, do not recommend fallback as the default path. State infeasibility first, then list fallback options separately.
 7. If the user only asks whether their hardware is sufficient, answer the hardware feasibility question first. Fallbacks may be listed as possible alternatives, but not as the assumed goal.
 8. Never describe a fallback result as reproducing the paper's main result unless the paper itself uses that same reduced setting.
+9. Fallback suggestions must be reported under `Fallback Status` as either not proposed, proposed but not accepted, accepted by user, or active by explicit user request.
+10. If the user has not provided a paper, repository, training config, model size, dataset, or target metric, explicitly say the answer is only a hardware feasibility assessment.
+11. Do not phrase a fallback as the new active target. Avoid wording equivalent to "I suggest defining the target as..." or "set the target to..." unless the user has accepted the fallback.
+12. For fallback suggestions, use conditional wording equivalent to "If you accept changing the target to a smoke test / pipeline sanity check, the fallback target can be..." or "If you accept this fallback, the fallback target would be..."
+13. Do not edit code or configs for a fallback until the repository has been inspected, `.bbb/reproduction_plan.md` has been generated, and the user approves the plan.
 
 Preferred wording:
 
 - "Your machine is not suitable for faithful LLM training reproduction, but it can run smoke tests or pipeline sanity checks."
 - "If you accept an approximate goal, a tiny model run can verify the training loop."
+- "If you accept changing the target to a smoke test / pipeline sanity check, the fallback target can be verifying the code path rather than reproducing the training result."
 - "This would validate implementation mechanics, not reproduce the paper's reported result."
 - "Before making code changes for the fallback, confirm that this is the target you want."
+
+Avoid:
+
+- "I suggest defining the target as a smoke test."
+- "We will use a tiny run as the plan."
+- "I can modify the config for a tiny run" before repository inspection, plan generation, and user approval.
+
+## LLM Training Feasibility Categories
+
+For LLM training tasks, explicitly distinguish these categories:
+
+1. Faithful training reproduction: reproduce the paper or repository's stated training result with the same method, model scale, data, training protocol, metrics, and compute assumptions.
+2. Code-path smoke test: run the smallest command that checks imports, model construction, tokenizer/data plumbing, forward pass, and one optimizer step. This does not reproduce the training result.
+3. Tiny overfit test: train on a tiny fixed sample until loss decreases to verify gradients and objective wiring. This does not reproduce the training result.
+4. Reduced-scale demo: train a smaller model, shorter sequence length, smaller dataset, fewer steps, or simplified evaluation. This is an approximation and must not be described as faithful reproduction.
+5. Cloud GPU reproduction plan: plan faithful or near-faithful execution on a stated cloud GPU environment such as Colab, AutoDL, Kaggle, RunPod, Vast.ai, or university servers, distinguishing cloud facts from local machine facts.
+
+When the user only asks "can my configuration run this LLM training code?" and lacks paper/repository/config/model/data/metric details, answer only hardware feasibility first. List any smoke test, tiny overfit test, or reduced-scale demo under `Fallback Options`, and mark `Fallback Status` as `proposed but not accepted`.
 
 
 
 ## Output Format
 
-Structure responses as:
+Every response for reproduction feasibility or optimization must start with these fields, in this order:
 
 1. **Paper Grounding Status**: list the paper/PDF/arXiv/README/repo evidence inspected and summarize the identified target claim, method, dataset, protocol, metrics, baseline, and compute assumptions; if not inspected or inaccessible, say so and do not invent details.
 2. **Repository Grounding Status**: list which repository files/configs were inspected, or say the answer is only a plan/pseudocode because files were not inspected.
-3. **Fidelity Status**: use one of: faithful reproduction, faithful-with-engineering-optimization, infeasible, or optional approximation.
-4. **Change Risk**: use one of: safe engineering change, numerically sensitive change, approximate reproduction, or method-changing modification.
-5. **Target Claim**: the paper result or user requirement being reproduced and what must be preserved.
-6. **Feasibility**: expected compute fit for the user's hardware, with main bottlenecks.
-7. **Plan**: numbered steps, commands/configs when paper-grounded and repository-grounded, dataset handling, run order, and estimated time.
-8. **Safe Optimizations**: optimizations that should preserve meaning.
-9. **Approximations**: optional deviations from the paper, why they may be needed, and how they bias interpretation.
-10. **Correctness Checks**: preflight, smoke, training/eval, and result checks.
-11. **Stop/Continue Criteria**: what result is enough, what failure means, and what to try next.
+3. **Hardware Grounding Status**: list `.bbb/hardware_profile.json`, `.bbb/repro_context.md`, cloud runtime facts, or user-provided hardware facts inspected; distinguish local hardware from cloud hardware.
+4. **Fidelity Status**: use one of: faithful reproduction, faithful-with-engineering-optimization, infeasible, or optional approximation.
+5. **Fallback Status**: use one of: not proposed, proposed but not accepted, accepted by user, or active by explicit user request.
+6. **Change Risk**: use one of: safe engineering change, numerically sensitive change, approximate reproduction, or method-changing modification.
 
-Keep plans executable and budget-aware. Prefer one viable faithful path over a broad menu unless the user asks for alternatives. If the paper has not been grounded, do not propose concrete reproduction steps, optimization patches, reduced-scale alternatives, or code changes. If the repository has not been inspected, do not present commands or patches as drop-in code.
+If the user has not provided a paper, repository, training config, model size, dataset, or target metric, the opening fields must be followed by a sentence equivalent to: "This is only a hardware feasibility assessment; it is not a reproduction plan or drop-in configuration patch."
+
+Then structure the rest of the response as needed:
+
+1. **Target Claim**: the paper result or user requirement being reproduced and what must be preserved.
+2. **Feasibility**: expected compute fit for the user's hardware, with main bottlenecks.
+3. **Plan**: numbered steps, commands/configs when paper-grounded and repository-grounded, dataset handling, run order, and estimated time.
+4. **Safe Optimizations**: optimizations that should preserve meaning.
+5. **Fallback Options**: optional smoke tests, tiny runs, one-batch overfit tests, pipeline sanity checks, or reduced-scale alternatives; these are not the active plan until the user explicitly accepts them.
+6. **Approximations**: optional deviations from the paper, why they may be needed, and how they bias interpretation.
+7. **Correctness Checks**: preflight, smoke, training/eval, and result checks.
+8. **Stop/Continue Criteria**: what result is enough, what failure means, and what to try next.
+
+Keep plans executable and budget-aware. Prefer one viable faithful path over a broad menu unless the user asks for alternatives. If the paper has not been grounded, do not propose concrete reproduction steps, optimization patches, reduced-scale alternatives, or code changes. If the repository has not been inspected, do not present commands or patches as drop-in code; clearly say any configuration advice is general and not a drop-in patch. Do not make fallback wording sound like the active target unless `Fallback Status` is `accepted by user` or `active by explicit user request`.
