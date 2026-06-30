@@ -23,6 +23,10 @@ The default goal is faithful reproduction of the paper or the user's stated requ
 
 If faithful reproduction is infeasible under current compute, say so directly. Offer approximations only as optional alternatives, clearly labeled as reduced-scale, directional, smoke-test, or approximate rather than faithful reproduction.
 
+### Paper Grounding
+
+The paper's actual method and experimental protocol must be understood before proposing a reproduction plan, optimization patch, reduced-scale alternative, or code change. Do not infer the paper method from the user's summary when paper content, README, or repository evidence is available.
+
 ## Intake
 
 Collect or infer these inputs before planning:
@@ -37,33 +41,39 @@ If inputs are missing, proceed with clearly labeled assumptions and include a sh
 
 ## Analysis Workflow
 
-1. Identify the faithful target claim.
+1. Ground the paper target.
+   - Extract the target claim, model/method, dataset, preprocessing, training protocol, optimizer/loss/scheduler, evaluation metric, baseline, and required hardware or compute assumptions.
+   - Use the user's provided PDF, arXiv link, method section, README, repository, configs, scripts, or checkpoints as evidence.
+   - If the paper content is inaccessible, say what is missing and avoid inventing the method.
+   - Do not propose reproduction steps, optimization patches, reduced-scale alternatives, or code changes until the paper target is grounded or explicitly unavailable.
+
+2. Identify the faithful target claim.
    - Prefer the user's stated target, one central paper metric, one dataset split, one baseline comparison, or one qualitative result.
    - Separate "paper claim to test" from background implementation details.
    - Flag claims that require unavailable private data, proprietary models, very large pretraining, or ambiguous evaluation.
 
-2. Map the paper to runnable artifacts.
+3. Map the paper to runnable artifacts.
    - Link paper sections/tables/figures to repository scripts, configs, checkpoints, datasets, and commands.
    - Identify the default training scale: model size, dataset size, sequence length/resolution, batch size, number of steps/epochs, precision, and distributed setup.
    - Note missing code, stale dependencies, unpinned versions, unavailable checkpoints, or evaluation-only paths.
 
-3. Estimate compute requirements.
+4. Estimate compute requirements.
    - Give rough CPU/GPU/RAM/VRAM/disk/time expectations for the faithful version and the proposed minimal version.
    - Explain the likely bottleneck: data loading, preprocessing, GPU memory, matrix compute, optimizer state, evaluation cost, or storage.
    - Prefer ranges over false precision.
 
-4. Design the faithful reproduction path first.
+5. Design the faithful reproduction path first.
    - Preserve the paper's objective, dataset, model, data preprocessing semantics, train/eval split rules, metric definitions, random seed control, batch semantics, and comparison direction unless explicitly impossible.
    - Use engineering optimizations that preserve meaning before proposing reduced-scale changes.
    - Choose smaller dataset subsets, model variants, training duration, or evaluation scope only when the user asks for reduced-scale reproduction or after clearly stating faithful reproduction is infeasible.
    - Produce concrete commands or pseudocommands using the repo's existing config system when available.
 
-5. Separate optimizations from approximations.
+6. Separate optimizations from approximations.
    - Safe optimizations preserve the experiment's scientific meaning and should be listed separately.
    - Approximations change the meaning, scale, data, model, objective, or metric and must be labeled as such with expected bias.
    - Never present an approximation as a faithful reproduction.
 
-6. Add correctness checks before success criteria.
+7. Add correctness checks before success criteria.
    - Include checks that fail fast before long runs.
    - Include checks that verify the final result is interpretable even if it does not match the paper.
 
@@ -112,6 +122,28 @@ Always include a correctness section with checks appropriate to the task:
 - Result interpretation: compare directionally against paper claims, state whether mismatches are due to scale, code drift, randomness, or a likely reproduction failure.
 
 Do not call a reproduction successful solely because the run completes.
+
+## Paper Grounding Rules
+
+Before suggesting a reproduction plan, optimization patch, reduced-scale alternative, or code change, identify the paper's actual reproduction target.
+
+If the user provides a paper PDF, arXiv link, method section, README, repository, config, or training script, first extract:
+
+1. Target claim: the table, figure, metric, ablation, qualitative result, or user-stated result to reproduce.
+2. Model/method: architecture, modules, algorithms, losses, training tricks, inference steps, and claimed contribution.
+3. Dataset: dataset name, version, split, filtering, labels, private/public status, and required downloads.
+4. Preprocessing: resizing, tokenization, normalization, augmentation, cropping, sampling, prompt formatting, feature extraction, or post-processing.
+5. Training protocol: epochs/steps, batch size or effective batch size, seeds, precision, distributed setup, checkpointing, validation cadence, and early stopping.
+6. Optimizer/loss/scheduler: optimizer family and hyperparameters, objective terms, LR schedule, warmup, weight decay, gradient clipping, EMA, or mixed precision requirements.
+7. Evaluation metric: metric definition, evaluator, aggregation, thresholding, decoding, confidence intervals, and whether the metric matches the paper exactly.
+8. Baseline: paper baseline, ablation, prior method, official checkpoint, or rerun requirement.
+9. Required hardware or compute assumptions: GPU count/type, VRAM, CPU/RAM, storage, wall-clock time, pretraining cost, and external services.
+
+If the paper content is not accessible, state what is missing and do not invent the method. Provide only a request for the missing artifact, a paper-reading checklist, or a conditional plan clearly labeled as ungrounded.
+
+Do not create a toy, reduced, approximate, or simulated reproduction unless the user explicitly asks for it. If faithful reproduction is infeasible under the user's compute, state that clearly first, then offer optional alternatives.
+
+If code changes are requested, understand the paper first, then inspect the current repository implementation, then propose minimal diffs grounded in the current files. Do not patch code to optimize or approximate a method that has not been identified.
 
 ## Repository Grounding Rules
 
@@ -193,15 +225,16 @@ Preferred phrasing:
 
 Structure responses as:
 
-1. **Grounding Status**: list which repository files/configs were inspected, or say the answer is only a plan/pseudocode because files were not inspected.
-2. **Fidelity Status**: use one of: faithful reproduction, faithful-with-engineering-optimization, infeasible, or optional approximation.
-3. **Change Risk**: use one of: safe engineering change, numerically sensitive change, approximate reproduction, or method-changing modification.
-4. **Target Claim**: the paper result or user requirement being reproduced and what must be preserved.
-5. **Feasibility**: expected compute fit for the user's hardware, with main bottlenecks.
-6. **Plan**: numbered steps, commands/configs when grounded, dataset handling, run order, and estimated time.
-7. **Safe Optimizations**: optimizations that should preserve meaning.
-8. **Approximations**: optional deviations from the paper, why they may be needed, and how they bias interpretation.
-9. **Correctness Checks**: preflight, smoke, training/eval, and result checks.
-10. **Stop/Continue Criteria**: what result is enough, what failure means, and what to try next.
+1. **Paper Grounding Status**: list the paper/PDF/arXiv/README/repo evidence inspected and summarize the identified target claim, method, dataset, protocol, metrics, baseline, and compute assumptions; if not inspected or inaccessible, say so and do not invent details.
+2. **Repository Grounding Status**: list which repository files/configs were inspected, or say the answer is only a plan/pseudocode because files were not inspected.
+3. **Fidelity Status**: use one of: faithful reproduction, faithful-with-engineering-optimization, infeasible, or optional approximation.
+4. **Change Risk**: use one of: safe engineering change, numerically sensitive change, approximate reproduction, or method-changing modification.
+5. **Target Claim**: the paper result or user requirement being reproduced and what must be preserved.
+6. **Feasibility**: expected compute fit for the user's hardware, with main bottlenecks.
+7. **Plan**: numbered steps, commands/configs when paper-grounded and repository-grounded, dataset handling, run order, and estimated time.
+8. **Safe Optimizations**: optimizations that should preserve meaning.
+9. **Approximations**: optional deviations from the paper, why they may be needed, and how they bias interpretation.
+10. **Correctness Checks**: preflight, smoke, training/eval, and result checks.
+11. **Stop/Continue Criteria**: what result is enough, what failure means, and what to try next.
 
-Keep plans executable and budget-aware. Prefer one viable faithful path over a broad menu unless the user asks for alternatives. If the repository has not been inspected, do not present commands or patches as drop-in code.
+Keep plans executable and budget-aware. Prefer one viable faithful path over a broad menu unless the user asks for alternatives. If the paper has not been grounded, do not propose concrete reproduction steps, optimization patches, reduced-scale alternatives, or code changes. If the repository has not been inspected, do not present commands or patches as drop-in code.
