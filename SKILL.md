@@ -27,6 +27,10 @@ If faithful reproduction is infeasible under current compute, say so directly. O
 
 The paper's actual method and experimental protocol must be understood before proposing a reproduction plan, optimization patch, reduced-scale alternative, or code change. Do not infer the paper method from the user's summary when paper content, README, or repository evidence is available.
 
+### Plan Before Patch
+
+Before editing code, generate `.bbb/reproduction_plan.md` and get the user's approval. The plan must distinguish paper facts, repository facts, hardware facts, and estimates. Estimated paper details must be explicitly labeled as estimates.
+
 ## Intake
 
 Collect or infer these inputs before planning:
@@ -39,41 +43,64 @@ Collect or infer these inputs before planning:
 
 If inputs are missing, proceed with clearly labeled assumptions and include a short "Need From User" section only for blockers that materially change feasibility.
 
+## Tool-Assisted Initialization
+
+For hardware-aware paper reproduction, training optimization, out-of-memory debugging, dataloader bottleneck diagnosis, or environment-specific planning, first recommend running:
+
+```bash
+python scripts/bbb_init.py --target <repo>
+```
+
+Use the current repository path as `<repo>` when working inside the user's project. The script creates `.bbb/` in the target repository and writes:
+
+- `.bbb/hardware_profile.json`
+- `.bbb/missing_info.md`
+- `.bbb/repro_context.md`
+
+It also adds `.bbb/` to `.gitignore` when the target directory is inside a Git repository. The script uses Python standard library by default, continues gracefully when optional packages such as `torch` or `psutil` are unavailable, and must not collect secrets, tokens, usernames, or unnecessary personal information.
+
+After running the initializer, inspect `.bbb/repro_context.md` and `.bbb/hardware_profile.json` before making hardware-specific recommendations. Treat these files as hardware facts, not paper facts.
+
 ## Analysis Workflow
 
-1. Ground the paper target.
+1. Initialize local context when hardware or environment matters.
+   - Run `python scripts/bbb_init.py --target <repo>` when available.
+   - Inspect `.bbb/repro_context.md`, `.bbb/hardware_profile.json`, and `.bbb/missing_info.md`.
+   - If the script cannot be run, state why and continue with only user-provided hardware facts.
+
+2. Ground the paper target.
    - Extract the target claim, model/method, dataset, preprocessing, training protocol, optimizer/loss/scheduler, evaluation metric, baseline, and required hardware or compute assumptions.
    - Use the user's provided PDF, arXiv link, method section, README, repository, configs, scripts, or checkpoints as evidence.
    - If the paper content is inaccessible, say what is missing and avoid inventing the method.
    - Do not propose reproduction steps, optimization patches, reduced-scale alternatives, or code changes until the paper target is grounded or explicitly unavailable.
 
-2. Identify the faithful target claim.
+3. Identify the faithful target claim.
    - Prefer the user's stated target, one central paper metric, one dataset split, one baseline comparison, or one qualitative result.
    - Separate "paper claim to test" from background implementation details.
    - Flag claims that require unavailable private data, proprietary models, very large pretraining, or ambiguous evaluation.
 
-3. Map the paper to runnable artifacts.
+4. Map the paper to runnable artifacts.
    - Link paper sections/tables/figures to repository scripts, configs, checkpoints, datasets, and commands.
    - Identify the default training scale: model size, dataset size, sequence length/resolution, batch size, number of steps/epochs, precision, and distributed setup.
    - Note missing code, stale dependencies, unpinned versions, unavailable checkpoints, or evaluation-only paths.
 
-4. Estimate compute requirements.
+5. Estimate compute requirements.
    - Give rough CPU/GPU/RAM/VRAM/disk/time expectations for the faithful version and the proposed minimal version.
    - Explain the likely bottleneck: data loading, preprocessing, GPU memory, matrix compute, optimizer state, evaluation cost, or storage.
    - Prefer ranges over false precision.
 
-5. Design the faithful reproduction path first.
+6. Design the faithful reproduction path first.
    - Preserve the paper's objective, dataset, model, data preprocessing semantics, train/eval split rules, metric definitions, random seed control, batch semantics, and comparison direction unless explicitly impossible.
    - Use engineering optimizations that preserve meaning before proposing reduced-scale changes.
    - Choose smaller dataset subsets, model variants, training duration, or evaluation scope only when the user asks for reduced-scale reproduction or after clearly stating faithful reproduction is infeasible.
    - Produce concrete commands or pseudocommands using the repo's existing config system when available.
 
-6. Separate optimizations from approximations.
+7. Separate optimizations from approximations.
    - Safe optimizations preserve the experiment's scientific meaning and should be listed separately.
    - Approximations change the meaning, scale, data, model, objective, or metric and must be labeled as such with expected bias.
    - Never present an approximation as a faithful reproduction.
 
-7. Add correctness checks before success criteria.
+8. Add correctness checks before success criteria.
    - Include checks that fail fast before long runs.
    - Include checks that verify the final result is interpretable even if it does not match the paper.
 
@@ -145,6 +172,8 @@ Do not create a toy, reduced, approximate, or simulated reproduction unless the 
 
 If code changes are requested, understand the paper first, then inspect the current repository implementation, then propose minimal diffs grounded in the current files. Do not patch code to optimize or approximate a method that has not been identified.
 
+If official author code is not found, say so. Do not substitute similar repositories, reimplementations, or third-party code unless the user explicitly asks for alternatives.
+
 ## Repository Grounding Rules
 
 The current repository is the source of truth.
@@ -163,6 +192,8 @@ When working with code:
 8. If required files are missing or inaccessible, stop and say what information is missing instead of inventing the implementation.
 9. Never modify code based on stale assumptions from an earlier conversation or earlier version of the project.
 10. Always preserve the user's existing project architecture unless there is a clear reason to change it.
+11. Before editing code, write `.bbb/reproduction_plan.md` and wait for explicit user approval.
+12. Do not generate drop-in replacement code until the current repository files have been inspected.
 
 Bad behavior:
 
@@ -178,6 +209,20 @@ Preferred behavior:
 - "Based on the current `solver.py`, the safe change is limited to this function."
 - "This is pseudocode because the repository structure has not been inspected."
 - "The current code does not match the described architecture, so I will not generate a drop-in patch yet."
+
+## Reproduction Plan Gate
+
+Before editing code, create `.bbb/reproduction_plan.md`. Do not edit code until the user approves that plan.
+
+The plan must contain:
+
+- Paper facts: facts extracted from the paper, README, official repository, configs, or author documentation.
+- Repository facts: facts inspected from current local files.
+- Hardware facts: facts from `.bbb/hardware_profile.json`, `.bbb/repro_context.md`, or user-provided hardware details.
+- Estimates: uncertain details, clearly labeled as estimates and never presented as paper facts.
+- Proposed changes: minimal diffs or configuration changes, with rationale and expected effect.
+- Correctness checks: commands, metrics, smoke tests, and comparison criteria.
+- Change risk: safe engineering change, numerically sensitive change, approximate reproduction, or method-changing modification.
 
 ## Fidelity First Rules
 
@@ -219,6 +264,51 @@ Preferred phrasing:
 - "This would be a reduced-scale sanity check, not a reproduction of the paper's reported result."
 - "I can propose an approximate variant, but it changes the experimental claim."
 - "To preserve the paper method, the safer option is to keep the original protocol and report that the current compute is insufficient."
+
+## Initialization and Local Context Rules
+
+For hardware-aware reproduction or optimization tasks, initialize a local context before making recommendations.
+
+Run:
+
+```bash
+python scripts/bbb_init.py
+```
+
+This creates a local `.bbb/` directory in the target repository.
+
+The `.bbb/` directory is a private working area for the agent and should be ignored by Git by default.
+
+Expected files:
+
+* `.bbb/hardware_profile.json`
+* `.bbb/missing_info.md`
+* `.bbb/repro_context.md`
+* `.bbb/paper_grounding.md`
+* `.bbb/repo_audit.md`
+* `.bbb/reproduction_plan.md`
+* `.bbb/decision_log.md`
+
+The assistant must use these files to avoid relying only on conversation memory.
+
+Before editing code, the assistant must generate `.bbb/reproduction_plan.md` and ask the user to approve it.
+
+Do not edit code before plan approval unless the user explicitly asks for immediate changes.
+
+The reproduction plan must separate:
+
+1. Paper facts
+2. Repository facts
+3. Hardware facts
+4. Estimates
+5. Unknowns
+6. Proposed changes
+7. Change risk
+8. Expected validation checks
+
+The assistant must not treat estimates as paper facts.
+
+If required information is missing, update `.bbb/missing_info.md` and ask the user to provide only the missing information that cannot be detected automatically.
 
 
 ## Output Format
