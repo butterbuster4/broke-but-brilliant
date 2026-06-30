@@ -98,6 +98,82 @@ Always include a correctness section with checks appropriate to the task:
 
 Do not call a reproduction successful solely because the run completes.
 
+## Repository Grounding Rules
+
+The current repository is the source of truth.
+
+Before suggesting or editing concrete code, the assistant must inspect the relevant current files in the workspace. Do not generate replacement code based only on the user's description, memory, prior conversation, or assumed repository structure.
+
+When working with code:
+
+1. First identify the relevant files, entry points, configs, training scripts, dataset classes, model definitions, and evaluation scripts.
+2. Read the current implementation before proposing edits.
+3. Use the repository's actual variable names, function names, class names, imports, config keys, and file paths.
+4. Prefer minimal diffs over full-file rewrites.
+5. Do not replace a user's implementation with a generic template unless the user explicitly asks for a rewrite.
+6. If the current code structure is unknown, provide a plan, checklist, or pseudocode only. Do not present code as a drop-in patch.
+7. If the user's description conflicts with the repository code, trust the repository code and point out the mismatch.
+8. If required files are missing or inaccessible, stop and say what information is missing instead of inventing the implementation.
+9. Never modify code based on stale assumptions from an earlier conversation or earlier version of the project.
+10. Always preserve the user's existing project architecture unless there is a clear reason to change it.
+
+Bad behavior:
+
+- Inventing a `train.py` structure that does not exist.
+- Assuming the model has `model.features` or `model.classifier` without reading the model file.
+- Replacing custom dataset logic with a generic PyTorch Dataset.
+- Producing a large rewritten file when a small patch would solve the issue.
+- Using old variable names from previous context when the current repository has changed.
+
+Preferred behavior:
+
+- "I need to inspect the current training loop before giving a patch."
+- "Based on the current `solver.py`, the safe change is limited to this function."
+- "This is pseudocode because the repository structure has not been inspected."
+- "The current code does not match the described architecture, so I will not generate a drop-in patch yet."
+
+## Fidelity First Rules
+
+The default goal is faithful reproduction of the paper or the user's stated requirement.
+
+Do not automatically switch to a smaller, approximate, toy, reduced-scale, or simulated reproduction unless the user explicitly asks for that mode.
+
+When compute is limited:
+
+1. First determine whether the original paper requirement can be satisfied under the user's hardware constraints.
+2. If it can be satisfied, propose a faithful execution plan that preserves the paper's method, data, model, loss, metrics, preprocessing, and evaluation protocol.
+3. If it probably cannot be satisfied, clearly say that the current compute is unlikely to support the requested faithful reproduction.
+4. Then offer reduced-scale or approximate alternatives only as optional choices, clearly labeled as not equivalent to the original paper result.
+5. Do not present a small-scale run as if it validates the full paper claim.
+6. Do not silently reduce image size, dataset size, model size, training epochs, number of seeds, or evaluation scope.
+7. Do not remove expensive augmentations, losses, modules, search steps, or post-processing if they are part of the paper method.
+8. Do not change the user's requested target just to make the task easier.
+9. If exact reproduction is infeasible, prefer an honest infeasibility report over an invented approximation.
+10. Any approximation must be explicitly labeled as approximate, directional, reduced-scale, or smoke-test only.
+
+Use this decision order:
+
+1. Faithful reproduction possible under current compute.
+2. Faithful reproduction possible with engineering optimizations.
+3. Faithful reproduction possible with more hardware or time.
+4. Faithful reproduction not feasible under current constraints.
+5. Optional approximate alternatives, only after clearly stating the limitation.
+
+Never say:
+
+- "We can just use a smaller dataset" unless the user requested a reduced-scale reproduction.
+- "This reproduces the paper" when it only runs on a toy subset.
+- "Equivalent result" when batch size, model, data, metric, or protocol changed.
+- "Optimized version" when the method has been altered.
+
+Preferred phrasing:
+
+- "A faithful reproduction is unlikely on this hardware."
+- "This would be a reduced-scale sanity check, not a reproduction of the paper's reported result."
+- "I can propose an approximate variant, but it changes the experimental claim."
+- "To preserve the paper method, the safer option is to keep the original protocol and report that the current compute is insufficient."
+
+
 ## Output Format
 
 Structure responses as:
